@@ -39,7 +39,8 @@
       "expo-image"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "baseUrl": "/Realm-of-Shadows"
     },
     "extra": {
       "eas": {

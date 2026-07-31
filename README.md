@@ -15,6 +15,19 @@ npm run backend
 
 Pass & Play works without a backend. Online mode requires `EXPO_PUBLIC_BACKEND_URL` pointing at a running FastAPI server.
 
+## Play on the web
+
+Live build: [amulyavarshney.github.io/Realm-of-Shadows](https://amulyavarshney.github.io/Realm-of-Shadows/)
+
+Pass & Play works in the browser. Online Host/Join needs a public HTTPS backend (`EXPO_PUBLIC_BACKEND_URL` secret for the Pages deploy workflow).
+
+```bash
+npm run export:web   # static site → dist/
+npm run deploy       # publish dist/ to gh-pages (needs GitHub write access)
+```
+
+Or push to `main` — `.github/workflows/deploy-pages.yml` builds and deploys via GitHub Pages (Actions source).
+
 ## Scripts
 
 | Command | Description |
@@ -23,6 +36,8 @@ Pass & Play works without a backend. Online mode requires `EXPO_PUBLIC_BACKEND_U
 | `npm test` | Unit tests (game logic, config) |
 | `npm run typecheck` | TypeScript check |
 | `npm run backend` | FastAPI multiplayer server |
+| `npm run export:web` | Static web export (`dist/`) |
+| `npm run deploy` | Export + publish to `gh-pages` |
 | `npm run build:production` | EAS Android AAB |
 | `npm run submit:android` | Submit to Play internal track |
 

@@ -2,6 +2,27 @@
 
 Production checklist for Android (primary) and iOS. Package / bundle ID: `com.realmofshadows.game`.
 
+## GitHub Pages (web)
+
+Site: `https://amulyavarshney.github.io/Realm-of-Shadows/`
+
+| Item | Detail |
+|------|--------|
+| Base path | `experiments.baseUrl` = `/Realm-of-Shadows` in `app.json` |
+| Build | `npx expo export -p web` → `dist/` (+ `.nojekyll` for `_expo` assets) |
+| CI | `.github/workflows/deploy-pages.yml` on push to `main` |
+| Pages source | **GitHub Actions** (recommended) or branch `gh-pages` / root |
+
+**One-time repo setup:** Settings → Pages → Source → **GitHub Actions**. Optional repo secret `EXPO_PUBLIC_BACKEND_URL` for online multiplayer in the web build.
+
+**Manual publish (alternative):**
+
+```bash
+npm run deploy   # expo export + gh-pages --nojekyll -d dist
+```
+
+Then Settings → Pages → Deploy from branch → `gh-pages` / `/ (root)`.
+
 ## Prerequisites (manual)
 
 | Step | Action |
