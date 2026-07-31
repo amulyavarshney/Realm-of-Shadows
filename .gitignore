@@ -44,6 +44,11 @@ secrets/
 # test / coverage
 coverage/
 
+# python
+__pycache__/
+*.py[cod]
+.venv/
+
 # typescript
 *.tsbuildinfo
 
