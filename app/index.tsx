@@ -7,7 +7,7 @@ import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '@/src/theme';
 import { OrnateTitle, Content } from '@/src/components/ui';
-import { HERO_IMAGE_URI } from '@/src/config';
+import { HERO_IMAGE } from '@/src/config';
 import { useResponsive } from '@/src/hooks/useResponsive';
 
 export default function Splash() {
@@ -22,7 +22,7 @@ export default function Splash() {
   return (
     <View style={{ flex: 1, backgroundColor: '#0D0D11' }} testID="splash-screen">
       <Image
-        source={{ uri: HERO_IMAGE_URI }}
+        source={HERO_IMAGE}
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         transition={200}

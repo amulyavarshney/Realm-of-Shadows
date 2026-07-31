@@ -14,7 +14,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '@/src/theme';
 import { ScreenBg, GoldButton, OrnateTitle, Card, Content } from '@/src/components/ui';
 import { useGame } from '@/src/game/context';
-import { apiFetch } from '@/src/api';
+import { apiFetch, BackendNotConfiguredError } from '@/src/api';
+import { BACKEND_CONFIG_MESSAGE, isBackendConfigured } from '@/src/config';
 import { useResponsive } from '@/src/hooks/useResponsive';
 
 export default function CreateRoom() {
@@ -27,6 +28,10 @@ export default function CreateRoom() {
 
   const create = async () => {
     const nm = name.trim();
+    if (!isBackendConfigured()) {
+      setErr(BACKEND_CONFIG_MESSAGE);
+      return;
+    }
     if (nm.length < 2) {
       setErr('Name must be at least 2 characters.');
       return;
@@ -48,9 +53,11 @@ export default function CreateRoom() {
       });
     } catch (e: any) {
       const msg =
-        e?.name === 'AbortError'
-          ? 'Request timed out. Is the server running?'
-          : e?.message || 'Failed to create room. Check connection.';
+        e instanceof BackendNotConfiguredError
+          ? BACKEND_CONFIG_MESSAGE
+          : e?.name === 'AbortError'
+            ? 'Request timed out. Is the server running?'
+            : e?.message || 'Failed to create room. Check connection.';
       setErr(msg);
       setLoading(false);
     }
@@ -65,12 +72,23 @@ export default function CreateRoom() {
         >
           <Content pad={pad} style={styles.container}>
             <View style={styles.header}>
-              <Pressable testID="back-btn" onPress={() => router.back()} style={{ padding: 4 }}>
+              <Pressable
+                testID="back-btn"
+                onPress={() => router.back()}
+                style={{ padding: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+              >
                 <MaterialCommunityIcons name="chevron-left" size={28} color={theme.colors.gold} />
               </Pressable>
               <OrnateTitle size={22}>Host a Game</OrnateTitle>
               <View style={{ width: 32 }} />
             </View>
+            {!isBackendConfigured() ? (
+              <Text style={styles.configWarn} accessibilityRole="alert">
+                {BACKEND_CONFIG_MESSAGE}
+              </Text>
+            ) : null}
             <View style={{ alignItems: 'center', marginTop: 30 }}>
               <MaterialCommunityIcons name="crown" size={64} color={theme.colors.gold} />
               <Text style={styles.sub}>Others will join with your 4-digit code.</Text>
@@ -88,10 +106,12 @@ export default function CreateRoom() {
                 autoCorrect={false}
                 returnKeyType="done"
                 onSubmitEditing={() => void create()}
+                accessibilityLabel="Your name"
+                accessibilityHint="Enter the name other players will see as host"
               />
             </Card>
             {err ? (
-              <Text style={styles.err} testID="create-error">
+              <Text style={styles.err} testID="create-error" accessibilityRole="alert">
                 {err}
               </Text>
             ) : null}
@@ -134,4 +154,12 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   err: { color: theme.colors.errorGlow, marginTop: 10, textAlign: 'center' },
+  configWarn: {
+    color: theme.colors.warning,
+    marginTop: 16,
+    textAlign: 'center',
+    fontSize: 13,
+    lineHeight: 20,
+    paddingHorizontal: 8,
+  },
 });

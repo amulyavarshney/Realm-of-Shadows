@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -6,17 +6,46 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import { theme } from '@/src/theme';
-import { ScreenBg, GoldButton, OrnateTitle, Card, Divider } from '@/src/components/ui';
+import { ScreenBg, GoldButton, OrnateTitle, Card, Divider, PrivacyOverlay } from '@/src/components/ui';
 import { useGame } from '@/src/game/context';
 import { ROLES, goodSuccesses, evilSuccesses } from '@/src/game/logic';
 
 export default function PnPGame() {
   const router = useRouter();
-  const { game, haptic, toggleTeamMember, confirmTeam, castVote, nextVoter, playMissionCard, nextMissionActor, resolveMission, advanceAfterMission, chooseAssassinationTarget, confirmAssassination, resetGame, continueAfterVoteReveal } = useGame();
+  const {
+    game, haptic, sound, toggleTeamMember, confirmTeam, castVote, nextVoter,
+    playMissionCard, nextMissionActor, resolveMission, advanceAfterMission,
+    chooseAssassinationTarget, confirmAssassination, resetGame, continueAfterVoteReveal,
+    rematchPnP,
+  } = useGame();
 
-  const [handoff, setHandoff] = useState(false); // shows "pass device" screen between secret actions
+  const [handoff, setHandoff] = useState(false);
   const [showVoteChoice, setShowVoteChoice] = useState<'approve'|'reject'|null>(null);
   const [missionChoice, setMissionChoice] = useState<'success'|'fail'|null>(null);
+  const prevPhase = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!game) return;
+    if (prevPhase.current !== game.phase) {
+      setHandoff(false);
+      setShowVoteChoice(null);
+      setMissionChoice(null);
+      prevPhase.current = game.phase;
+    }
+  }, [game?.phase]);
+
+  useEffect(() => {
+    if (game?.phase === 'endgame' && game.winner) {
+      sound(game.winner === 'good' ? 'win' : 'lose');
+    }
+  }, [game?.phase, game?.winner]);
+
+  useEffect(() => {
+    if (game?.phase === 'mission_reveal') {
+      const res = game.missionResults[game.currentMission];
+      if (res) sound(res.outcome === 'success' ? 'success' : 'fail');
+    }
+  }, [game?.phase, game?.currentMission]);
 
   if (!game) return (
     <ScreenBg>
@@ -30,6 +59,12 @@ export default function PnPGame() {
   const leader = game.players[game.currentLeader];
 
   const backToMenu = () => { resetGame(); router.replace('/menu'); };
+
+  const rematch = () => {
+    haptic('medium');
+    rematchPnP();
+    router.replace('/pnp/reveal');
+  };
 
   // ---------- MissionTracker ----------
   const Tracker = () => (
@@ -86,7 +121,7 @@ export default function PnPGame() {
               })}
             </View>
             <View style={{ marginTop: 20 }}>
-              <GoldButton testID="confirm-team-btn" title="Propose Team" icon="hand-heart" onPress={() => { haptic('medium'); confirmTeam(); }} disabled={!done} />
+              <GoldButton testID="confirm-team-btn" title="Propose Team" icon="hand-heart" onPress={() => { haptic('medium'); sound('tap'); confirmTeam(); }} disabled={!done} />
             </View>
           </ScrollView>
         </SafeAreaView>
@@ -98,16 +133,17 @@ export default function PnPGame() {
   if (game.phase === 'vote') {
     const voter = game.players[game.currentVoter];
     if (!handoff && game.currentVoter > 0) {
-      return <Handoff who={voter.name} onReady={() => setHandoff(true)} label="cast their vote" />;
+      return <Handoff who={voter.name} onReady={() => setHandoff(true)} label="cast their vote in secret" />;
     }
     return (
       <ScreenBg>
         <SafeAreaView style={{ flex: 1 }}>
           <View style={{ padding: 20, flex: 1 }}>
             <TopBar onBack={backToMenu} good={good} evil={evil} mission={game.currentMission + 1} rejects={game.proposeVoteCount} />
-            <View style={{ alignItems: 'center', marginTop: 20 }}>
+            <PrivacyOverlay message={`Only ${voter.name} should see this screen`} />
+            <View style={{ alignItems: 'center', marginTop: 12 }}>
               <OrnateTitle size={22}>{voter.name}'s Vote</OrnateTitle>
-              <Text style={styles.sub}>Proposed team:</Text>
+              <Text style={styles.sub}>Proposed team — vote in secret:</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 8 }}>
                 {game.currentTeam.map(pid => {
                   const p = game.players.find(x => x.id === pid)!;
@@ -117,12 +153,12 @@ export default function PnPGame() {
             </View>
             {!showVoteChoice ? (
               <View style={{ flex: 1, justifyContent: 'center', gap: 16 }}>
-                <Pressable testID="vote-approve-btn" onPress={() => { haptic('heavy'); castVote('approve'); setShowVoteChoice('approve'); }} style={[styles.bigChoice, { borderColor: theme.colors.successGlow }]}>
+                <Pressable testID="vote-approve-btn" onPress={() => { haptic('heavy'); sound('tap'); castVote('approve'); setShowVoteChoice('approve'); }} style={[styles.bigChoice, { borderColor: theme.colors.successGlow }]}>
                   <LinearGradient colors={['#0A2A1A', '#052014']} style={StyleSheet.absoluteFill} />
                   <MaterialCommunityIcons name="shield-check" size={56} color={theme.colors.successGlow} />
                   <Text style={[styles.bigChoiceText, { color: theme.colors.successGlow }]}>APPROVE</Text>
                 </Pressable>
-                <Pressable testID="vote-reject-btn" onPress={() => { haptic('heavy'); castVote('reject'); setShowVoteChoice('reject'); }} style={[styles.bigChoice, { borderColor: theme.colors.errorGlow }]}>
+                <Pressable testID="vote-reject-btn" onPress={() => { haptic('heavy'); sound('tap'); castVote('reject'); setShowVoteChoice('reject'); }} style={[styles.bigChoice, { borderColor: theme.colors.errorGlow }]}>
                   <LinearGradient colors={['#3A0A0A', '#1A0505']} style={StyleSheet.absoluteFill} />
                   <MaterialCommunityIcons name="skull" size={56} color={theme.colors.errorGlow} />
                   <Text style={[styles.bigChoiceText, { color: theme.colors.errorGlow }]}>REJECT</Text>
@@ -133,7 +169,7 @@ export default function PnPGame() {
                 <MaterialCommunityIcons name={showVoteChoice === 'approve' ? 'shield-check' : 'skull'} size={80} color={showVoteChoice === 'approve' ? theme.colors.successGlow : theme.colors.errorGlow} />
                 <Text style={styles.voteConfirmed}>Vote sealed.</Text>
                 <View style={{ marginTop: 20, width: '80%' }}>
-                  <GoldButton testID="next-voter-btn" title={game.currentVoter + 1 >= game.players.length ? 'Reveal Votes' : 'Pass to Next'} icon="arrow-right" onPress={() => { setShowVoteChoice(null); setHandoff(false); nextVoter(); }} />
+                  <GoldButton testID="next-voter-btn" title={game.currentVoter + 1 >= game.players.length ? 'Reveal Votes' : 'Pass to Next'} icon="arrow-right" onPress={() => { sound('seal'); setShowVoteChoice(null); setHandoff(false); nextVoter(); }} />
                 </View>
               </View>
             )}
@@ -175,7 +211,7 @@ export default function PnPGame() {
                 testID="continue-vote-btn"
                 title={last.approved ? 'Begin The Mission' : `Continue (${game.proposeVoteCount + 1}/5 rejects)`}
                 icon="arrow-right"
-                onPress={() => { haptic(last.approved ? 'success' : 'error'); continueAfterVoteReveal(); }}
+                onPress={() => { haptic(last.approved ? 'success' : 'error'); sound(last.approved ? 'success' : 'fail'); continueAfterVoteReveal(); }}
               />
             </View>
           </ScrollView>
@@ -189,27 +225,28 @@ export default function PnPGame() {
     const actor = game.players.find(p => p.id === game.currentTeam[game.currentMissionActor])!;
     const isEvil = ROLES[actor.role].alignment === 'evil';
     if (!handoff && game.currentMissionActor > 0) {
-      return <Handoff who={actor.name} onReady={() => setHandoff(true)} label="play their mission card" />;
+      return <Handoff who={actor.name} onReady={() => setHandoff(true)} label="play their mission card in secret" />;
     }
     return (
       <ScreenBg>
         <SafeAreaView style={{ flex: 1 }}>
           <View style={{ padding: 20, flex: 1 }}>
             <TopBar onBack={backToMenu} good={good} evil={evil} mission={game.currentMission + 1} rejects={game.proposeVoteCount} />
-            <View style={{ alignItems: 'center', marginTop: 20 }}>
+            <PrivacyOverlay message={`Only ${actor.name} should see this screen`} />
+            <View style={{ alignItems: 'center', marginTop: 12 }}>
               <OrnateTitle size={22}>{actor.name}</OrnateTitle>
               <Text style={styles.sub}>Play thy mission card in secret.</Text>
             </View>
             {!missionChoice ? (
               <View style={{ flex: 1, justifyContent: 'center', gap: 16 }}>
-                <Pressable testID="mission-success-btn" onPress={() => { haptic('success'); playMissionCard('success'); setMissionChoice('success'); }} style={[styles.bigChoice, { borderColor: theme.colors.successGlow }]}>
+                <Pressable testID="mission-success-btn" onPress={() => { haptic('success'); sound('tap'); playMissionCard('success'); setMissionChoice('success'); }} style={[styles.bigChoice, { borderColor: theme.colors.successGlow }]}>
                   <LinearGradient colors={['#0A2A1A', '#052014']} style={StyleSheet.absoluteFill} />
                   <MaterialCommunityIcons name="shield-check" size={56} color={theme.colors.successGlow} />
                   <Text style={[styles.bigChoiceText, { color: theme.colors.successGlow }]}>SUCCESS</Text>
                 </Pressable>
                 <Pressable
                   testID="mission-fail-btn"
-                  onPress={() => { if (!isEvil) return; haptic('error'); playMissionCard('fail'); setMissionChoice('fail'); }}
+                  onPress={() => { if (!isEvil) return; haptic('error'); sound('tap'); playMissionCard('fail'); setMissionChoice('fail'); }}
                   disabled={!isEvil}
                   style={[styles.bigChoice, { borderColor: theme.colors.errorGlow, opacity: isEvil ? 1 : 0.35 }]}
                 >
@@ -228,7 +265,7 @@ export default function PnPGame() {
                     testID="next-mission-actor-btn"
                     title={game.currentMissionActor + 1 >= game.currentTeam.length ? 'Reveal Mission' : 'Pass to Next'}
                     icon="arrow-right"
-                    onPress={() => { setMissionChoice(null); setHandoff(false); if (game.currentMissionActor + 1 >= game.currentTeam.length) resolveMission(); nextMissionActor(); }}
+                    onPress={() => { sound('seal'); setMissionChoice(null); setHandoff(false); if (game.currentMissionActor + 1 >= game.currentTeam.length) resolveMission(); nextMissionActor(); }}
                   />
                 </View>
               </View>
@@ -267,14 +304,25 @@ export default function PnPGame() {
   // ---------- Assassination ----------
   if (game.phase === 'assassination') {
     const assassin = game.players.find(p => p.role === 'assassin');
+    if (!handoff && assassin) {
+      return (
+        <Handoff
+          who={assassin.name}
+          onReady={() => setHandoff(true)}
+          label="name who they believe is the Seer"
+          subtitle="The Assassin acts alone — everyone else must look away"
+        />
+      );
+    }
     return (
       <ScreenBg>
         <SafeAreaView style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <PrivacyOverlay message="Assassin's secret choice — do not peek" />
             <OrnateTitle size={26}>The Final Strike</OrnateTitle>
             <Text style={[styles.sub, { textAlign: 'center', marginTop: 10 }]}>
               The Realm has claimed three victories, but one last treachery remains.{'\n\n'}
-              <Text style={{ color: theme.colors.errorGlow }}>{assassin?.name}, the Assassin</Text>, name the Seer.
+              Name who you believe is the Seer.
             </Text>
             <Text style={[styles.phaseTitle, { marginTop: 20 }]}>Choose thy target:</Text>
             <View style={styles.playerGrid}>
@@ -302,7 +350,7 @@ export default function PnPGame() {
                 icon="knife-military"
                 variant="danger"
                 disabled={!game.assassinationTarget}
-                onPress={() => { haptic('heavy'); confirmAssassination(); }}
+                onPress={() => { haptic('heavy'); sound('fail'); confirmAssassination(); }}
               />
             </View>
           </ScrollView>
@@ -337,8 +385,9 @@ export default function PnPGame() {
                   </View>
                 );
               })}
-              <View style={{ marginTop: 24 }}>
-                <GoldButton testID="new-game-btn" title="Return to Menu" icon="home" onPress={backToMenu} />
+              <View style={{ marginTop: 24, gap: 12 }}>
+                <GoldButton testID="rematch-btn" title="Play Again" icon="refresh" variant="success" onPress={rematch} />
+                <GoldButton testID="new-game-btn" title="Return to Menu" icon="home" variant="ghost" onPress={backToMenu} />
               </View>
             </Animated.View>
           </ScrollView>
@@ -366,17 +415,28 @@ function TopBar({ onBack, good, evil, mission, rejects }: any) {
   );
 }
 
-function Handoff({ who, onReady, label }: { who: string; onReady: () => void; label: string }) {
+function Handoff({ who, onReady, label, subtitle }: { who: string; onReady: () => void; label: string; subtitle?: string }) {
+  const { haptic, sound } = useGame();
   return (
     <ScreenBg>
       <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-        <MaterialCommunityIcons name="cellphone-arrow-down" size={80} color={theme.colors.gold} />
+        <View style={styles.handoffIcon}>
+          <MaterialCommunityIcons name="cellphone-arrow-down" size={64} color={theme.colors.gold} />
+        </View>
         <OrnateTitle size={26} style={{ marginTop: 16 }}>Pass the Device</OrnateTitle>
-        <Text style={{ color: theme.colors.onSurface2, marginTop: 10, textAlign: 'center', fontStyle: 'italic' }}>
-          {who}, take the device to {label}.
+        <Text style={styles.handoffWho}>{who}</Text>
+        <Text style={styles.handoffInstr}>
+          Take the device privately to {label}.
         </Text>
+        {subtitle ? <Text style={styles.handoffSub}>{subtitle}</Text> : null}
+        <Text style={styles.handoffHint}>Everyone else — look away until they tap ready.</Text>
         <View style={{ marginTop: 30, width: '80%' }}>
-          <GoldButton testID="handoff-ready-btn" title="I am ready" icon="check" onPress={onReady} />
+          <GoldButton
+            testID="handoff-ready-btn"
+            title="I am ready"
+            icon="check"
+            onPress={() => { haptic('medium'); sound('tap'); onReady(); }}
+          />
         </View>
       </SafeAreaView>
     </ScreenBg>
@@ -419,4 +479,13 @@ const styles = StyleSheet.create({
   revealRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.divider, gap: 12 },
   revealName: { color: theme.colors.parchment, fontSize: 15, flex: 1 },
   revealRole: { fontFamily: 'serif', fontSize: 15 },
+  handoffIcon: {
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: 'rgba(26,26,34,0.8)', borderWidth: 2, borderColor: theme.colors.goldDark,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  handoffWho: { color: theme.colors.gold, fontFamily: 'serif', fontSize: 24, marginTop: 12 },
+  handoffInstr: { color: theme.colors.onSurface2, marginTop: 10, textAlign: 'center', fontStyle: 'italic', paddingHorizontal: 24, fontSize: 15 },
+  handoffSub: { color: theme.colors.errorGlow, marginTop: 10, textAlign: 'center', fontStyle: 'italic', paddingHorizontal: 24, fontSize: 13 },
+  handoffHint: { color: theme.colors.onSurface3, marginTop: 16, textAlign: 'center', fontSize: 11, letterSpacing: 1, textTransform: 'uppercase' },
 });

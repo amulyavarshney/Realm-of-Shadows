@@ -188,6 +188,18 @@ export function Card({ children, style }: { children: React.ReactNode; style?: S
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
+/** Full-screen privacy reminder for secret pass-and-play actions */
+export function PrivacyOverlay({ message }: { message?: string }) {
+  return (
+    <View style={styles.privacyOverlay} pointerEvents="none">
+      <MaterialCommunityIcons name="eye-off-outline" size={18} color={theme.colors.gold} />
+      <Text style={styles.privacyText}>
+        {message ?? 'Ensure no one else can see this screen'}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   btnWrap: {
     borderRadius: 12,
@@ -223,5 +235,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
     padding: 16,
+  },
+  privacyOverlay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(13,13,17,0.92)',
+    borderWidth: 1,
+    borderColor: theme.colors.goldDark,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  privacyText: {
+    color: theme.colors.onSurface2,
+    fontSize: 12,
+    fontStyle: 'italic',
+    letterSpacing: 0.5,
+    flexShrink: 1,
   },
 });

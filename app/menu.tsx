@@ -8,12 +8,22 @@ import { Image } from 'expo-image';
 import { theme } from '@/src/theme';
 import { GoldButton, OrnateTitle, Divider, Content } from '@/src/components/ui';
 import { useGame } from '@/src/game/context';
-import { HERO_IMAGE_URI } from '@/src/config';
+import { HERO_IMAGE } from '@/src/config';
 import { useResponsive } from '@/src/hooks/useResponsive';
+
+const PHASE_LABELS: Record<string, string> = {
+  team_selection: 'Team selection',
+  vote: 'Secret voting',
+  vote_reveal: 'Vote results',
+  mission: 'Mission in progress',
+  mission_reveal: 'Mission reveal',
+  assassination: 'Assassination',
+  endgame: 'Game over',
+};
 
 export default function Menu() {
   const router = useRouter();
-  const { haptic } = useGame();
+  const { haptic, pnpSession, sessionLoaded, resumePnP } = useGame();
   const { pad, titleScale, isCompact } = useResponsive();
 
   const go = (path: string) => {
@@ -21,10 +31,23 @@ export default function Menu() {
     router.push(path as any);
   };
 
+  const resume = () => {
+    haptic('medium');
+    const route = resumePnP();
+    if (route) router.push(route as any);
+  };
+
+  const hasResume = sessionLoaded && pnpSession != null;
+  const resumeLabel = pnpSession
+    ? (pnpSession.revealComplete
+      ? PHASE_LABELS[pnpSession.game.phase] ?? 'In progress'
+      : `Role reveal · player ${pnpSession.revealIndex + 1}/${pnpSession.playerNames.length}`)
+    : '';
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface }} testID="main-menu-screen">
       <Image
-        source={{ uri: HERO_IMAGE_URI }}
+        source={HERO_IMAGE}
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         cachePolicy="memory-disk"
@@ -52,7 +75,24 @@ export default function Menu() {
               <Text style={styles.subtitle}>Trust none. Suspect all.</Text>
             </View>
 
-            <View style={{ marginTop: isCompact ? 28 : 40 }}>
+            {hasResume ? (
+              <View style={{ marginTop: isCompact ? 20 : 28 }}>
+                <Pressable
+                  testID="resume-pnp-btn"
+                  onPress={resume}
+                  style={({ pressed }) => [styles.resumeBanner, pressed && { opacity: 0.85 }]}
+                >
+                  <MaterialCommunityIcons name="play-circle" size={28} color={theme.colors.gold} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.resumeTitle}>Resume Game</Text>
+                    <Text style={styles.resumeSub}>{resumeLabel}</Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.gold} />
+                </Pressable>
+              </View>
+            ) : null}
+
+            <View style={{ marginTop: hasResume ? 14 : (isCompact ? 28 : 40) }}>
               <GoldButton
                 testID="pnp-mode-btn"
                 title="Pass & Play"
@@ -143,6 +183,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textTransform: 'uppercase',
   },
+  resumeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26,26,34,0.92)',
+    borderWidth: 1.5,
+    borderColor: theme.colors.gold,
+    borderRadius: 14,
+    padding: 16,
+    shadowColor: theme.colors.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+  },
+  resumeTitle: { color: theme.colors.gold, fontFamily: 'serif', fontSize: 17, letterSpacing: 0.5 },
+  resumeSub: { color: theme.colors.onSurface2, fontSize: 12, marginTop: 2, fontStyle: 'italic' },
   grid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   tile: {
     flex: 1,

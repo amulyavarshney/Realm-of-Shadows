@@ -1,22 +1,31 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, interpolate, Extrapolation } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '@/src/theme';
-import { ScreenBg, GoldButton, OrnateTitle, Card } from '@/src/components/ui';
+import { ScreenBg, GoldButton, OrnateTitle, PrivacyOverlay } from '@/src/components/ui';
 import { useGame } from '@/src/game/context';
 import { ROLES } from '@/src/game/logic';
 
 export default function PnPReveal() {
   const router = useRouter();
-  const { game, haptic } = useGame();
-  const [idx, setIdx] = useState(0);
+  const { game, pnpSession, haptic, sound, setRevealIndex, completeReveal } = useGame();
+  const [idx, setIdx] = useState(pnpSession?.revealIndex ?? 0);
   const [revealed, setRevealed] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const flip = useSharedValue(0);
+
+  useEffect(() => {
+    if (pnpSession?.revealIndex != null && pnpSession.revealIndex !== idx) {
+      setIdx(pnpSession.revealIndex);
+      setRevealed(false);
+      setConfirmed(false);
+      flip.value = 0;
+    }
+  }, [pnpSession?.revealIndex]);
 
   if (!game) return <ScreenBg><Text style={{ color: 'white', margin: 40 }}>No game</Text></ScreenBg>;
 
@@ -38,12 +47,14 @@ export default function PnPReveal() {
   const doReveal = () => {
     if (revealed) return;
     haptic('light');
+    sound('reveal');
     flip.value = withTiming(1, { duration: 700 });
     setRevealed(true);
   };
 
   const doHide = () => {
     haptic('select');
+    sound('seal');
     flip.value = withTiming(0, { duration: 500 });
     setRevealed(false);
     setConfirmed(true);
@@ -52,10 +63,13 @@ export default function PnPReveal() {
   const nextPlayer = () => {
     haptic('medium');
     if (idx + 1 >= game.players.length) {
+      completeReveal();
       router.replace('/pnp/game');
       return;
     }
-    setIdx(idx + 1);
+    const next = idx + 1;
+    setIdx(next);
+    setRevealIndex(next);
     setRevealed(false);
     setConfirmed(false);
     flip.value = 0;
@@ -65,12 +79,13 @@ export default function PnPReveal() {
     <ScreenBg>
       <SafeAreaView style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
+          <PrivacyOverlay message={`Only ${player.name} should view this screen`} />
           <Text style={styles.stepText} testID="reveal-progress">Player {idx + 1} of {game.players.length}</Text>
           <OrnateTitle size={28} style={{ marginTop: 6 }}>{player.name}</OrnateTitle>
           <Text style={styles.instr}>
             {!confirmed
-              ? (revealed ? 'Memorize thy fate. Hide before passing.' : 'Ensure privacy, then reveal thy role.')
-              : 'Pass the device to the next player.'}
+              ? (revealed ? 'Memorize thy fate, then hide before passing the device.' : 'Step away from others, then reveal thy role.')
+              : 'Hand the device to the next player — do not show your role.'}
           </Text>
 
           <View style={styles.cardWrap}>

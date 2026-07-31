@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameState, initialGameState, computeMissionOutcome } from './logic';
 import * as Haptics from 'expo-haptics';
+import { initAudio, playSound, setSoundEnabled, type SoundKind } from '@/src/audio';
 
 interface Settings {
   hapticsEnabled: boolean;
@@ -18,6 +19,14 @@ export interface HistoryEntry {
   missions: ('success' | 'fail' | 'skipped')[];
 }
 
+export interface PnPSession {
+  game: GameState;
+  playerNames: string[];
+  advancedRoles: boolean;
+  revealComplete: boolean;
+  revealIndex: number;
+}
+
 export type HapticKind = 'light' | 'medium' | 'heavy' | 'success' | 'error' | 'select';
 
 interface Ctx {
@@ -26,7 +35,13 @@ interface Ctx {
   history: HistoryEntry[];
   clearHistory: () => void;
   game: GameState | null;
+  pnpSession: PnPSession | null;
+  sessionLoaded: boolean;
   startPnP: (names: string[]) => void;
+  rematchPnP: () => void;
+  resumePnP: () => '/pnp/reveal' | '/pnp/game' | null;
+  setRevealIndex: (idx: number) => void;
+  completeReveal: () => void;
   setPhase: (p: GameState['phase']) => void;
   toggleTeamMember: (pid: string) => void;
   confirmTeam: () => void;
@@ -41,12 +56,15 @@ interface Ctx {
   continueAfterVoteReveal: () => void;
   resetGame: () => void;
   haptic: (t: HapticKind) => void;
+  sound: (t: SoundKind) => void;
 }
 
 const GameContext = createContext<Ctx | null>(null);
 
 const HISTORY_KEY = 'ros:history';
 const SETTINGS_KEY = 'ros:settings';
+const PNP_SESSION_KEY = 'ros:pnp:session';
+const PNP_TIP_KEY = 'ros:pnp:tip-seen';
 
 const DEFAULT_SETTINGS: Settings = {
   hapticsEnabled: true,
@@ -54,28 +72,74 @@ const DEFAULT_SETTINGS: Settings = {
   advancedRoles: true,
 };
 
+async function persistSession(session: PnPSession | null) {
+  if (session) {
+    await AsyncStorage.setItem(PNP_SESSION_KEY, JSON.stringify(session));
+  } else {
+    await AsyncStorage.removeItem(PNP_SESSION_KEY);
+  }
+}
+
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [game, setGame] = useState<GameState | null>(null);
+  const [pnpSession, setPnpSession] = useState<PnPSession | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
   const settingsRef = useRef(settings);
   const historyRef = useRef(history);
+  const pnpSessionRef = useRef(pnpSession);
   settingsRef.current = settings;
   historyRef.current = history;
+  pnpSessionRef.current = pnpSession;
+
+  const syncSession = useCallback((nextGame: GameState | null, patch?: Partial<PnPSession>) => {
+    if (!nextGame) {
+      pnpSessionRef.current = null;
+      setPnpSession(null);
+      void persistSession(null);
+      return;
+    }
+    const prev = pnpSessionRef.current;
+    const session: PnPSession = {
+      game: nextGame,
+      playerNames: patch?.playerNames ?? prev?.playerNames ?? nextGame.players.map((p) => p.name),
+      advancedRoles: patch?.advancedRoles ?? prev?.advancedRoles ?? settingsRef.current.advancedRoles,
+      revealComplete: patch?.revealComplete ?? prev?.revealComplete ?? false,
+      revealIndex: patch?.revealIndex ?? prev?.revealIndex ?? 0,
+    };
+    pnpSessionRef.current = session;
+    setPnpSession(session);
+    void persistSession(session);
+  }, []);
 
   useEffect(() => {
+    void initAudio();
     let cancelled = false;
     (async () => {
       try {
-        const [s, h] = await Promise.all([
+        const [s, h, pnp] = await Promise.all([
           AsyncStorage.getItem(SETTINGS_KEY),
           AsyncStorage.getItem(HISTORY_KEY),
+          AsyncStorage.getItem(PNP_SESSION_KEY),
         ]);
         if (cancelled) return;
-        if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) });
+        if (s) {
+          const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(s) };
+          setSettings(parsed);
+          setSoundEnabled(parsed.soundEnabled);
+        }
         if (h) setHistory(JSON.parse(h));
+        if (pnp) {
+          const session: PnPSession = JSON.parse(pnp);
+          pnpSessionRef.current = session;
+          setPnpSession(session);
+          setGame(session.game);
+        }
       } catch {
         /* ignore corrupt storage */
+      } finally {
+        if (!cancelled) setSessionLoaded(true);
       }
     })();
     return () => {
@@ -87,6 +151,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const next = { ...settingsRef.current, ...s };
     settingsRef.current = next;
     setSettings(next);
+    if (s.soundEnabled !== undefined) setSoundEnabled(next.soundEnabled);
     void AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
   }, []);
 
@@ -131,40 +196,113 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const startPnP = useCallback((names: string[]) => {
-    setGame(initialGameState(names, settingsRef.current.advancedRoles));
+  const sound = useCallback((t: SoundKind) => {
+    void playSound(t);
   }, []);
 
-  const setPhase = useCallback((p: GameState['phase']) => {
-    setGame((g) => (g ? { ...g, phase: p } : g));
-  }, []);
+  const applyGame = useCallback(
+    (updater: (g: GameState | null) => GameState | null, patch?: Partial<PnPSession>) => {
+      setGame((prev) => {
+        const next = updater(prev);
+        if (next) syncSession(next, patch);
+        else syncSession(null);
+        return next;
+      });
+    },
+    [syncSession],
+  );
 
-  const toggleTeamMember = useCallback((pid: string) => {
-    setGame((g) => {
-      if (!g) return g;
-      const teamSize = g.config.missions[g.currentMission];
-      let team = g.currentTeam;
-      if (team.includes(pid)) team = team.filter((x) => x !== pid);
-      else if (team.length < teamSize) team = [...team, pid];
-      else return g;
-      return { ...g, currentTeam: team };
+  const startPnP = useCallback(
+    (names: string[]) => {
+      const advanced = settingsRef.current.advancedRoles;
+      const next = initialGameState(names, advanced);
+      setGame(next);
+      syncSession(next, {
+        playerNames: names,
+        advancedRoles: advanced,
+        revealComplete: false,
+        revealIndex: 0,
+      });
+    },
+    [syncSession],
+  );
+
+  const rematchPnP = useCallback(() => {
+    const prev = pnpSessionRef.current;
+    const names = prev?.playerNames ?? game?.players.map((p) => p.name);
+    if (!names?.length) return;
+    const advanced = prev?.advancedRoles ?? settingsRef.current.advancedRoles;
+    const next = initialGameState(names, advanced);
+    setGame(next);
+    syncSession(next, {
+      playerNames: names,
+      advancedRoles: advanced,
+      revealComplete: false,
+      revealIndex: 0,
     });
+  }, [game, syncSession]);
+
+  const resumePnP = useCallback((): '/pnp/reveal' | '/pnp/game' | null => {
+    const session = pnpSessionRef.current;
+    if (!session) return null;
+    setGame(session.game);
+    return session.revealComplete ? '/pnp/game' : '/pnp/reveal';
   }, []);
+
+  const setRevealIndex = useCallback(
+    (idx: number) => {
+      const session = pnpSessionRef.current;
+      if (!session) return;
+      syncSession(session.game, { revealIndex: idx });
+    },
+    [syncSession],
+  );
+
+  const completeReveal = useCallback(() => {
+    const session = pnpSessionRef.current;
+    if (!session) return;
+    syncSession(session.game, { revealComplete: true });
+  }, [syncSession]);
+
+  const setPhase = useCallback(
+    (p: GameState['phase']) => {
+      applyGame((g) => (g ? { ...g, phase: p } : g));
+    },
+    [applyGame],
+  );
+
+  const toggleTeamMember = useCallback(
+    (pid: string) => {
+      applyGame((g) => {
+        if (!g) return g;
+        const teamSize = g.config.missions[g.currentMission];
+        let team = g.currentTeam;
+        if (team.includes(pid)) team = team.filter((x) => x !== pid);
+        else if (team.length < teamSize) team = [...team, pid];
+        else return g;
+        return { ...g, currentTeam: team };
+      });
+    },
+    [applyGame],
+  );
 
   const confirmTeam = useCallback(() => {
-    setGame((g) => (g ? { ...g, phase: 'vote', currentVote: {}, currentVoter: 0 } : g));
-  }, []);
+    applyGame((g) => (g ? { ...g, phase: 'vote', currentVote: {}, currentVoter: 0 } : g));
+  }, [applyGame]);
 
-  const castVote = useCallback((v: 'approve' | 'reject') => {
-    setGame((g) => {
-      if (!g) return g;
-      const voterId = g.players[g.currentVoter].id;
-      return { ...g, currentVote: { ...g.currentVote, [voterId]: v } };
-    });
-  }, []);
+  const castVote = useCallback(
+    (v: 'approve' | 'reject') => {
+      applyGame((g) => {
+        if (!g) return g;
+        const voterId = g.players[g.currentVoter].id;
+        return { ...g, currentVote: { ...g.currentVote, [voterId]: v } };
+      });
+    },
+    [applyGame],
+  );
 
   const nextVoter = useCallback(() => {
-    setGame((g) => {
+    applyGame((g) => {
       if (!g) return g;
       if (g.currentVoter + 1 >= g.players.length) {
         const approves = Object.values(g.currentVote).filter((v) => v === 'approve').length;
@@ -185,28 +323,31 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
       return { ...g, currentVoter: g.currentVoter + 1 };
     });
-  }, []);
+  }, [applyGame]);
 
-  const playMissionCard = useCallback((v: 'success' | 'fail') => {
-    setGame((g) => {
-      if (!g) return g;
-      const pid = g.currentTeam[g.currentMissionActor];
-      return { ...g, currentMissionCards: { ...g.currentMissionCards, [pid]: v } };
-    });
-  }, []);
+  const playMissionCard = useCallback(
+    (v: 'success' | 'fail') => {
+      applyGame((g) => {
+        if (!g) return g;
+        const pid = g.currentTeam[g.currentMissionActor];
+        return { ...g, currentMissionCards: { ...g.currentMissionCards, [pid]: v } };
+      });
+    },
+    [applyGame],
+  );
 
   const nextMissionActor = useCallback(() => {
-    setGame((g) => {
+    applyGame((g) => {
       if (!g) return g;
       if (g.currentMissionActor + 1 >= g.currentTeam.length) {
         return { ...g, phase: 'mission_reveal' };
       }
       return { ...g, currentMissionActor: g.currentMissionActor + 1 };
     });
-  }, []);
+  }, [applyGame]);
 
   const resolveMission = useCallback(() => {
-    setGame((g) => {
+    applyGame((g) => {
       if (!g) return g;
       const cards = g.currentTeam.map((pid) => g.currentMissionCards[pid]);
       const outcome = computeMissionOutcome(g, cards);
@@ -214,10 +355,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       results[g.currentMission] = { team: g.currentTeam, cards, outcome };
       return { ...g, missionResults: results };
     });
-  }, []);
+  }, [applyGame]);
 
   const advanceAfterMission = useCallback(() => {
-    setGame((g) => {
+    applyGame((g) => {
       if (!g) return g;
       const good = g.missionResults.filter((m) => m?.outcome === 'success').length;
       const evil = g.missionResults.filter((m) => m?.outcome === 'fail').length;
@@ -233,7 +374,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         return { ...g, phase: 'endgame', winner: 'evil', winReason: 'Three missions sabotaged.' };
       }
       if (good >= 3) {
-        return { ...g, phase: 'assassination' };
+        return { ...g, phase: 'assassination', assassinationTarget: null };
       }
       return {
         ...g,
@@ -248,14 +389,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         phase: 'team_selection',
       };
     });
-  }, [saveHistory]);
+  }, [applyGame, saveHistory]);
 
-  const chooseAssassinationTarget = useCallback((pid: string) => {
-    setGame((g) => (g ? { ...g, assassinationTarget: pid } : g));
-  }, []);
+  const chooseAssassinationTarget = useCallback(
+    (pid: string) => {
+      applyGame((g) => (g ? { ...g, assassinationTarget: pid } : g));
+    },
+    [applyGame],
+  );
 
   const confirmAssassination = useCallback(() => {
-    setGame((g) => {
+    applyGame((g) => {
       if (!g || !g.assassinationTarget) return g;
       const target = g.players.find((p) => p.id === g.assassinationTarget);
       const evilWins = target?.role === 'seer';
@@ -273,10 +417,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       });
       return { ...g, phase: 'endgame', winner, winReason: reason };
     });
-  }, [saveHistory]);
+  }, [applyGame, saveHistory]);
 
   const continueAfterVoteReveal = useCallback(() => {
-    setGame((g) => {
+    applyGame((g) => {
       if (!g) return g;
       const last = g.voteHistory[g.voteHistory.length - 1];
       if (!last) return g;
@@ -310,9 +454,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         phase: 'team_selection',
       };
     });
-  }, [saveHistory]);
+  }, [applyGame, saveHistory]);
 
-  const resetGame = useCallback(() => setGame(null), []);
+  const resetGame = useCallback(() => {
+    setGame(null);
+    syncSession(null);
+  }, [syncSession]);
 
   const value: Ctx = {
     settings,
@@ -320,7 +467,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     history,
     clearHistory,
     game,
+    pnpSession,
+    sessionLoaded,
     startPnP,
+    rematchPnP,
+    resumePnP,
+    setRevealIndex,
+    completeReveal,
     setPhase,
     toggleTeamMember,
     confirmTeam,
@@ -335,6 +488,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     continueAfterVoteReveal,
     resetGame,
     haptic,
+    sound,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
@@ -345,3 +499,5 @@ export function useGame() {
   if (!c) throw new Error('useGame must be inside GameProvider');
   return c;
 }
+
+export { PNP_TIP_KEY };

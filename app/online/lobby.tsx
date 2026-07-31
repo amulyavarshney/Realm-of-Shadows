@@ -2,21 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-  interpolate,
-  Extrapolation,
-} from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '@/src/theme';
 import { ScreenBg, GoldButton, OrnateTitle, Divider, Content } from '@/src/components/ui';
-import { ROLES, type RoleId } from '@/src/game/logic';
 import { useGame } from '@/src/game/context';
 import { BACKEND_WS } from '@/src/config';
 import { useResponsive } from '@/src/hooks/useResponsive';
+import { parseServerEvent } from '@/src/network/types';
 
 type Player = { id: string; name: string; is_host: boolean; connected: boolean };
 
@@ -38,23 +30,6 @@ export default function Lobby() {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
   const [myId, setMyId] = useState<string | null>(params.playerId || null);
-  const [role, setRole] = useState<{ role: RoleId; knowledge: { sees: string[]; hint: string } } | null>(
-    null,
-  );
-  const [gameStarted, setGameStarted] = useState(false);
-  const [revealed, setRevealed] = useState(false);
-
-  const flip = useSharedValue(0);
-  const frontStyle = useAnimatedStyle(() => ({
-    transform: [{ rotateY: `${interpolate(flip.value, [0, 1], [0, 180], Extrapolation.CLAMP)}deg` }],
-    backfaceVisibility: 'hidden' as const,
-    opacity: flip.value > 0.5 ? 0 : 1,
-  }));
-  const backStyle = useAnimatedStyle(() => ({
-    transform: [{ rotateY: `${interpolate(flip.value, [0, 1], [180, 360], Extrapolation.CLAMP)}deg` }],
-    backfaceVisibility: 'hidden' as const,
-    opacity: flip.value > 0.5 ? 1 : 0,
-  }));
 
   useEffect(() => {
     aliveRef.current = true;
@@ -80,25 +55,22 @@ export default function Lobby() {
       };
 
       ws.onmessage = (e) => {
-        try {
-          const { event, payload } = JSON.parse(e.data as string);
-          if (event === 'joined') {
-            setConnected(true);
-            myIdRef.current = payload.player_id;
-            setMyId(payload.player_id);
-          } else if (event === 'lobby') {
-            setPlayers(payload.players);
-          } else if (event === 'role_assigned') {
-            setRole({ role: payload.role, knowledge: payload.knowledge });
-            haptic('medium');
-          } else if (event === 'game_started') {
-            gameStartedRef.current = true;
-            setGameStarted(true);
-          } else if (event === 'error') {
-            setError(payload.message);
-          }
-        } catch {
-          /* ignore malformed */
+        const evt = parseServerEvent(e.data as string);
+        if (!evt) return;
+        if (evt.event === 'joined') {
+          setConnected(true);
+          myIdRef.current = evt.payload.player_id;
+          setMyId(evt.payload.player_id);
+        } else if (evt.event === 'lobby') {
+          setPlayers(evt.payload.players);
+        } else if (evt.event === 'game_started') {
+          gameStartedRef.current = true;
+          const pid = myIdRef.current || params.playerId;
+          router.replace(
+            `/online/game?code=${encodeURIComponent(params.code)}&playerId=${encodeURIComponent(pid || '')}&name=${encodeURIComponent(params.name)}` as never,
+          );
+        } else if (evt.event === 'error') {
+          setError(evt.payload.message);
         }
       };
 
@@ -150,97 +122,6 @@ export default function Lobby() {
       /* cancelled */
     }
   };
-
-  const doReveal = () => {
-    haptic('light');
-    flip.value = withTiming(1, { duration: 500 });
-    setRevealed(true);
-  };
-  const doHide = () => {
-    haptic('select');
-    flip.value = withTiming(0, { duration: 350 });
-    setRevealed(false);
-  };
-
-  if (gameStarted && role) {
-    const info = ROLES[role.role];
-    const isEvil = info.alignment === 'evil';
-    return (
-      <ScreenBg>
-        <SafeAreaView style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={{ padding: pad, alignItems: 'center' }}>
-            <Content pad={0}>
-              <OrnateTitle size={22}>{params.name}</OrnateTitle>
-              <Text style={styles.sub}>Thy fate is sealed. Reveal it in privacy.</Text>
-              <View style={[rvStyles.wrap, isCompact && { height: 340 }]}>
-                <Animated.View style={[rvStyles.card, frontStyle]}>
-                  <LinearGradient colors={['#2A241A', '#1A1710']} style={StyleSheet.absoluteFill} />
-                  <MaterialCommunityIcons name="shield-crown" size={80} color={theme.colors.gold} />
-                  <Text style={rvStyles.back}>Realm of Shadows</Text>
-                  <Text style={rvStyles.backSub}>Tap to Reveal</Text>
-                </Animated.View>
-                <Animated.View
-                  style={[
-                    rvStyles.card,
-                    backStyle,
-                    {
-                      borderColor: isEvil ? theme.colors.errorGlow : theme.colors.successGlow,
-                      shadowColor: isEvil ? theme.colors.errorGlow : theme.colors.successGlow,
-                    },
-                  ]}
-                >
-                  <LinearGradient
-                    colors={isEvil ? ['#3A0A0A', '#1A0505'] : ['#0A2A1A', '#052014']}
-                    style={StyleSheet.absoluteFill}
-                  />
-                  <MaterialCommunityIcons
-                    name={info.icon as any}
-                    size={72}
-                    color={isEvil ? theme.colors.errorGlow : theme.colors.successGlow}
-                  />
-                  <Text style={[rvStyles.name, { color: isEvil ? '#FFD6D6' : '#D4F0E0' }]}>
-                    {info.name}
-                  </Text>
-                  <View
-                    style={[
-                      rvStyles.pill,
-                      { backgroundColor: isEvil ? theme.colors.evil : theme.colors.good },
-                    ]}
-                  >
-                    <Text style={rvStyles.pillText}>{isEvil ? 'EVIL' : 'GOOD'}</Text>
-                  </View>
-                  <Text style={rvStyles.short}>{info.short}</Text>
-                  <Text style={rvStyles.hint}>{role.knowledge.hint}</Text>
-                  {role.knowledge.sees.map((n, i) => (
-                    <Text key={i} style={rvStyles.seen}>
-                      · {n} ·
-                    </Text>
-                  ))}
-                </Animated.View>
-              </View>
-              <View style={{ marginTop: 20, width: '100%' }}>
-                {!revealed ? (
-                  <GoldButton testID="online-reveal-btn" title="Reveal Role" icon="eye" onPress={doReveal} />
-                ) : (
-                  <GoldButton
-                    testID="online-hide-btn"
-                    title="Hide Role"
-                    icon="eye-off"
-                    variant="ghost"
-                    onPress={doHide}
-                  />
-                )}
-              </View>
-              <Text style={styles.footer}>
-                Team selection, voting and missions are announced by the host in-person.{'\n'}
-                Consult the Rules screen if unsure.
-              </Text>
-            </Content>
-          </ScrollView>
-        </SafeAreaView>
-      </ScreenBg>
-    );
-  }
 
   return (
     <ScreenBg>
@@ -421,57 +302,4 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     fontSize: 12,
   },
-  sub: { color: theme.colors.onSurface2, marginTop: 6, fontStyle: 'italic', textAlign: 'center' },
-  footer: {
-    color: theme.colors.onSurface3,
-    textAlign: 'center',
-    marginTop: 20,
-    fontSize: 11,
-    fontStyle: 'italic',
-    paddingHorizontal: 20,
-    lineHeight: 16,
-  },
-});
-
-const rvStyles = StyleSheet.create({
-  wrap: { width: '100%', height: 400, alignSelf: 'center', marginTop: 20 },
-  card: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: theme.colors.gold,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    padding: 20,
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  back: { color: theme.colors.gold, fontFamily: 'serif', fontSize: 22, marginTop: 16, letterSpacing: 2 },
-  backSub: {
-    color: theme.colors.onSurface3,
-    fontStyle: 'italic',
-    marginTop: 6,
-    letterSpacing: 3,
-    fontSize: 11,
-    textTransform: 'uppercase',
-  },
-  name: { fontFamily: 'serif', fontSize: 28, marginTop: 12, letterSpacing: 1.2 },
-  pill: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, marginTop: 8 },
-  pillText: { color: '#F0EAD6', fontSize: 11, letterSpacing: 3, fontWeight: '700' },
-  short: {
-    color: theme.colors.onSurface2,
-    textAlign: 'center',
-    marginTop: 14,
-    paddingHorizontal: 10,
-    fontStyle: 'italic',
-    fontSize: 13,
-  },
-  hint: { color: theme.colors.gold, fontSize: 12, letterSpacing: 1, marginTop: 14, textAlign: 'center' },
-  seen: { color: theme.colors.parchment, fontFamily: 'serif', fontSize: 15, marginTop: 4 },
 });

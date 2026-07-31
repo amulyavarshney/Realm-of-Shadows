@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '@/src/theme';
 import { ScreenBg, GoldButton, OrnateTitle, Divider, Card } from '@/src/components/ui';
-import { useGame } from '@/src/game/context';
+import { useGame, PNP_TIP_KEY } from '@/src/game/context';
 
 const DEFAULT_NAMES = ['Aria', 'Bram', 'Cael', 'Dara', 'Elric', 'Fira', 'Gale', 'Hild', 'Ivor', 'Jora'];
 
@@ -14,6 +15,19 @@ export default function PnPSetup() {
   const { startPnP, haptic, settings, updateSettings } = useGame();
   const [count, setCount] = useState(5);
   const [names, setNames] = useState<string[]>(DEFAULT_NAMES.slice(0, 5));
+  const [showTip, setShowTip] = useState(false);
+
+  useEffect(() => {
+    void AsyncStorage.getItem(PNP_TIP_KEY).then((v) => {
+      if (!v) setShowTip(true);
+    });
+  }, []);
+
+  const dismissTip = () => {
+    haptic('select');
+    setShowTip(false);
+    void AsyncStorage.setItem(PNP_TIP_KEY, '1');
+  };
 
   const setPlayerCount = (n: number) => {
     if (n < 5 || n > 10) return;
@@ -53,6 +67,21 @@ export default function PnPSetup() {
               <OrnateTitle size={26}>Assemble Thy Court</OrnateTitle>
               <View style={{ width: 32 }} />
             </View>
+
+            {showTip ? (
+              <Card style={styles.tipCard}>
+                <View style={styles.tipHeader}>
+                  <MaterialCommunityIcons name="cellphone-information" size={22} color={theme.colors.gold} />
+                  <Text style={styles.tipTitle}>Pass & Play Tips</Text>
+                  <Pressable onPress={dismissTip} hitSlop={12}>
+                    <MaterialCommunityIcons name="close" size={20} color={theme.colors.onSurface3} />
+                  </Pressable>
+                </View>
+                <Text style={styles.tipBody}>
+                  One device is shared by all players. Each player privately views their role, then passes the device for votes and mission cards. Look away when it is not your turn.
+                </Text>
+              </Card>
+            ) : null}
 
             <Card style={{ marginTop: 20 }}>
               <Text style={styles.label}>Players</Text>
@@ -125,4 +154,8 @@ const styles = StyleSheet.create({
   toggleOn: { backgroundColor: theme.colors.goldDark, borderColor: theme.colors.gold },
   knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: theme.colors.onSurface3 },
   knobOn: { backgroundColor: theme.colors.gold, transform: [{ translateX: 18 }] },
+  tipCard: { marginTop: 16, borderColor: theme.colors.goldDark },
+  tipHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  tipTitle: { color: theme.colors.gold, fontFamily: 'serif', fontSize: 15, flex: 1 },
+  tipBody: { color: theme.colors.onSurface2, fontSize: 13, lineHeight: 20, fontStyle: 'italic' },
 });

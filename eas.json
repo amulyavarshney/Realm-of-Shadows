@@ -15,12 +15,18 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false
       }
     },
     "production": {
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
+      },
+      "ios": {
+        "simulator": false
       }
     }
   },
@@ -29,6 +35,11 @@
       "android": {
         "serviceAccountKeyPath": "./secrets/play-service-account.json",
         "track": "internal"
+      },
+      "ios": {
+        "appleId": "your-apple-id@example.com",
+        "ascAppId": "replace-with-app-store-connect-app-id",
+        "appleTeamId": "replace-with-team-id"
       }
     }
   }

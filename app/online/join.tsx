@@ -14,7 +14,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '@/src/theme';
 import { ScreenBg, GoldButton, OrnateTitle, Card, Content } from '@/src/components/ui';
 import { useGame } from '@/src/game/context';
-import { apiFetch } from '@/src/api';
+import { apiFetch, BackendNotConfiguredError } from '@/src/api';
+import { BACKEND_CONFIG_MESSAGE, isBackendConfigured } from '@/src/config';
 import { useResponsive } from '@/src/hooks/useResponsive';
 
 export default function JoinRoom() {
@@ -28,6 +29,10 @@ export default function JoinRoom() {
 
   const join = async () => {
     setErr('');
+    if (!isBackendConfigured()) {
+      setErr(BACKEND_CONFIG_MESSAGE);
+      return;
+    }
     if (name.trim().length < 2) {
       setErr('Enter your name.');
       return;
@@ -47,9 +52,11 @@ export default function JoinRoom() {
       });
     } catch (e: any) {
       const msg =
-        e?.name === 'AbortError'
-          ? 'Request timed out. Is the server running?'
-          : e?.message || 'Failed to join';
+        e instanceof BackendNotConfiguredError
+          ? BACKEND_CONFIG_MESSAGE
+          : e?.name === 'AbortError'
+            ? 'Request timed out. Is the server running?'
+            : e?.message || 'Failed to join';
       setErr(msg);
       setLoading(false);
     }
@@ -64,12 +71,23 @@ export default function JoinRoom() {
         >
           <Content pad={pad} style={styles.container}>
             <View style={styles.header}>
-              <Pressable testID="back-btn" onPress={() => router.back()} style={{ padding: 4 }}>
+              <Pressable
+                testID="back-btn"
+                onPress={() => router.back()}
+                style={{ padding: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+              >
                 <MaterialCommunityIcons name="chevron-left" size={28} color={theme.colors.gold} />
               </Pressable>
               <OrnateTitle size={22}>Join a Game</OrnateTitle>
               <View style={{ width: 32 }} />
             </View>
+            {!isBackendConfigured() ? (
+              <Text style={styles.configWarn} accessibilityRole="alert">
+                {BACKEND_CONFIG_MESSAGE}
+              </Text>
+            ) : null}
             <View style={{ alignItems: 'center', marginTop: 30 }}>
               <MaterialCommunityIcons
                 name="account-multiple-plus"
@@ -89,6 +107,8 @@ export default function JoinRoom() {
                 placeholderTextColor={theme.colors.onSurface3}
                 maxLength={16}
                 autoCorrect={false}
+                accessibilityLabel="Your name"
+                accessibilityHint="Enter the name other players will see"
               />
               <Text style={[styles.label, { marginTop: 14 }]}>Room Code</Text>
               <TextInput
@@ -101,10 +121,12 @@ export default function JoinRoom() {
                 keyboardType="number-pad"
                 maxLength={4}
                 onSubmitEditing={() => void join()}
+                accessibilityLabel="Room code"
+                accessibilityHint="Enter the four digit code from the host"
               />
             </Card>
             {err ? (
-              <Text style={styles.err} testID="join-error">
+              <Text style={styles.err} testID="join-error" accessibilityRole="alert">
                 {err}
               </Text>
             ) : null}
@@ -154,4 +176,12 @@ const styles = StyleSheet.create({
     color: theme.colors.gold,
   },
   err: { color: theme.colors.errorGlow, marginTop: 10, textAlign: 'center' },
+  configWarn: {
+    color: theme.colors.warning,
+    marginTop: 16,
+    textAlign: 'center',
+    fontSize: 13,
+    lineHeight: 20,
+    paddingHorizontal: 8,
+  },
 });
